@@ -1,20 +1,25 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { supabase } from "../../lib/supabaseClient"
 import { Dumbbell, LogOut, Users, LineChart, Salad } from "lucide-react"
 
 export default function DashboardLayout({ children }) {
   const router = useRouter()
+  const pathname = usePathname()
+
   const [profile, setProfile] = useState(null)
+  const [role, setRole] = useState("cliente")
   const [fatalError, setFatalError] = useState("")
+
+  const isActive = (href) => pathname === href || pathname.startsWith(href + "/")
 
   useEffect(() => {
     const load = async () => {
       setFatalError("")
 
-      // 1) sessione (più affidabile per capire se sei loggato)
+      // session
       const { data: sessionData } = await supabase.auth.getSession()
       const session = sessionData?.session
       if (!session?.user) {
@@ -24,7 +29,20 @@ export default function DashboardLayout({ children }) {
 
       const user = session.user
 
-      // 2) prova a leggere profilo
+      // ruolo da user_roles (fondamentale per admin/coach)
+      const { data: roleRow, error: roleErr } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", user.id)
+        .maybeSingle()
+
+      if (roleErr) {
+        setFatalError(`Errore lettura ruolo: ${roleErr.message}`)
+        return
+      }
+      setRole(roleRow?.role ?? "cliente")
+
+      // profilo (non blocchiamo tutto se manca: proviamo a crearlo)
       const { data: prof, error: profErr } = await supabase
         .from("profiles")
         .select("*")
@@ -32,20 +50,14 @@ export default function DashboardLayout({ children }) {
         .maybeSingle()
 
       if (profErr) {
-        // QUI di solito è RLS (policy mancante) -> non fare loop sul login
         setFatalError(`Errore lettura profilo: ${profErr.message}`)
         return
       }
 
-      // 3) se non esiste profilo, prova a crearlo (evita loop)
       if (!prof) {
         const { error: insErr } = await supabase
           .from("profiles")
-          .insert({
-            id: user.id,
-            email: user.email,
-            ruolo: "cliente" // cambia default se vuoi
-          })
+          .insert({ id: user.id, email: user.email })
 
         if (insErr) {
           setFatalError(`Profilo mancante e non posso crearlo: ${insErr.message}`)
@@ -82,11 +94,8 @@ export default function DashboardLayout({ children }) {
     return (
       <div className="min-h-screen flex items-center justify-center px-4">
         <div className="max-w-xl w-full rounded-2xl border border-red-500/30 bg-red-500/5 p-5 text-sm">
-          <p className="font-semibold text-red-300 mb-2">Accesso ok, ma profilo bloccato</p>
+          <p className="font-semibold text-red-300 mb-2">Errore accesso dashboard</p>
           <p className="text-red-200/90">{fatalError}</p>
-          <p className="text-red-200/70 mt-3">
-            Quasi sempre è una policy RLS su Supabase o manca la riga in <b>profiles</b>.
-          </p>
           <button
             onClick={logout}
             className="mt-4 rounded-xl bg-white/10 px-4 py-2 text-xs hover:bg-white/15"
@@ -106,9 +115,14 @@ export default function DashboardLayout({ children }) {
     )
   }
 
-  const isAdmin = profile.ruolo === "admin"
-  const isCoach = profile.ruolo === "coach"
-  const isCliente = profile.ruolo === "cliente"
+  const isAdmin = role === "admin"
+  const isCoach = role === "coach"
+  const isCliente = role === "cliente"
+
+  const linkClass = (href) =>
+    `flex items-center gap-2 px-3 py-2 rounded-xl ${
+      isActive(href) ? "bg-white/5" : "hover:bg-white/5"
+    }`
 
   return (
     <div className="min-h-screen bg-nutriBg text-gray-100 flex">
@@ -124,22 +138,27 @@ export default function DashboardLayout({ children }) {
         </div>
 
         <nav className="flex-1 space-y-1 text-sm">
-          <a href="/dashboard" className="flex items-center gap-2 px-3 py-2 rounded-xl bg-white/5">
+          <a href="/dashboard" className={linkClass("/dashboard")}>
             <LineChart className="w-4 h-4" />
             <span>Overview</span>
           </a>
 
           {isAdmin && (
             <>
-              <a href="/dashboard/admin/utenti" className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/5">
+              <a href="/dashboard/admin/utenti" className={linkClass("/dashboard/admin/utenti")}>
                 <Users className="w-4 h-4" />
                 <span>Gestione utenti</span>
               </a>
-              <a href="/dashboard/admin/schede" className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/5">
+
+              <a href="/dashboard/admin/schede" className={linkClass("/dashboard/admin/schede")}>
                 <Dumbbell className="w-4 h-4" />
                 <span>Schede allenamento</span>
               </a>
-              <a href="/dashboard/admin/alimentazione" className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/5">
+
+              <a
+                href="/dashboard/admin/alimentazione"
+                className={linkClass("/dashboard/admin/alimentazione")}
+              >
                 <Salad className="w-4 h-4" />
                 <span>Piani alimentari</span>
               </a>
@@ -148,11 +167,12 @@ export default function DashboardLayout({ children }) {
 
           {isCoach && (
             <>
-              <a href="/dashboard/coach/clienti" className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/5">
+              <a href="/dashboard/coach/clienti" className={linkClass("/dashboard/coach/clienti")}>
                 <Users className="w-4 h-4" />
                 <span>I miei clienti</span>
               </a>
-              <a href="/dashboard/coach/schede" className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/5">
+
+              <a href="/dashboard/coach/schede" className={linkClass("/dashboard/coach/schede")}>
                 <Dumbbell className="w-4 h-4" />
                 <span>Schede create</span>
               </a>
@@ -161,11 +181,18 @@ export default function DashboardLayout({ children }) {
 
           {isCliente && (
             <>
-              <a href="/dashboard/user/allenamenti" className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/5">
+              <a
+                href="/dashboard/user/allenamenti"
+                className={linkClass("/dashboard/user/allenamenti")}
+              >
                 <Dumbbell className="w-4 h-4" />
                 <span>I miei allenamenti</span>
               </a>
-              <a href="/dashboard/user/alimentazione" className="flex items-center gap-2 px-3 py-2 rounded-xl hover:bg-white/5">
+
+              <a
+                href="/dashboard/user/alimentazione"
+                className={linkClass("/dashboard/user/alimentazione")}
+              >
                 <Salad className="w-4 h-4" />
                 <span>Il mio piano alimentare</span>
               </a>
@@ -173,7 +200,10 @@ export default function DashboardLayout({ children }) {
           )}
         </nav>
 
-        <button onClick={logout} className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-gray-300 hover:bg-white/5">
+        <button
+          onClick={logout}
+          className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs text-gray-300 hover:bg-white/5"
+        >
           <LogOut className="w-4 h-4" />
           Esci
         </button>
