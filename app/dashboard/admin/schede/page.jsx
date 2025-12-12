@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import { supabase } from "../../../lib/supabaseClient"
 
 export default function SchedeAdminPage() {
@@ -30,6 +30,7 @@ export default function SchedeAdminPage() {
   const loadSchede = async () => {
     resetAlerts()
     setLoading(true)
+
     const { data, error } = await supabase
       .from("schede_allenamento")
       .select("id,titolo,descrizione,coach_id,created_at,updated_at")
@@ -53,6 +54,7 @@ export default function SchedeAdminPage() {
 
   useEffect(() => {
     loadSchede()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const selectScheda = async (s) => {
@@ -66,12 +68,18 @@ export default function SchedeAdminPage() {
   const createScheda = async () => {
     resetAlerts()
     if (!titolo.trim()) return setErr("Inserisci un titolo.")
+
     const { data: sessionData } = await supabase.auth.getSession()
     const uid = sessionData?.session?.user?.id
+    if (!uid) return setErr("Sessione non valida. Rifai login.")
 
     const { data, error } = await supabase
       .from("schede_allenamento")
-      .insert({ titolo: titolo.trim(), descrizione: descrizione.trim() || null, coach_id: uid })
+      .insert({
+        titolo: titolo.trim(),
+        descrizione: descrizione.trim() || null,
+        coach_id: uid,
+      })
       .select()
       .single()
 
@@ -103,11 +111,17 @@ export default function SchedeAdminPage() {
     if (!selected) return
     if (!confirm("Eliminare questa scheda?")) return
 
-    const { error } = await supabase.from("schede_allenamento").delete().eq("id", selected.id)
+    const { error } = await supabase
+      .from("schede_allenamento")
+      .delete()
+      .eq("id", selected.id)
+
     if (error) return setErr(error.message)
 
     setMsg("Scheda eliminata ✅")
     setSelected(null)
+    setTitolo("")
+    setDescrizione("")
     setEsercizi([])
     await loadSchede()
   }
@@ -131,7 +145,11 @@ export default function SchedeAdminPage() {
 
     if (error) return setErr(error.message)
 
-    setExNome(""); setExSerie(""); setExRip(""); setExRec(""); setExNote("")
+    setExNome("")
+    setExSerie("")
+    setExRip("")
+    setExRec("")
+    setExNote("")
     setMsg("Esercizio aggiunto ✅")
     await loadEsercizi(selected.id)
   }
@@ -154,7 +172,13 @@ export default function SchedeAdminPage() {
       </div>
 
       {(err || msg) && (
-        <div className={`rounded-2xl border p-3 text-sm ${err ? "border-red-500/30 bg-red-500/5 text-red-200" : "border-emerald-500/30 bg-emerald-500/5 text-emerald-200"}`}>
+        <div
+          className={`rounded-2xl border p-3 text-sm ${
+            err
+              ? "border-red-500/30 bg-red-500/5 text-red-200"
+              : "border-emerald-500/30 bg-emerald-500/5 text-emerald-200"
+          }`}
+        >
           {err || msg}
         </div>
       )}
@@ -183,16 +207,22 @@ export default function SchedeAdminPage() {
                   key={s.id}
                   onClick={() => selectScheda(s)}
                   className={`w-full text-left rounded-2xl border p-3 hover:bg-white/5 ${
-                    selected?.id === s.id ? "border-white/20 bg-white/5" : "border-white/10"
+                    selected?.id === s.id
+                      ? "border-white/20 bg-white/5"
+                      : "border-white/10"
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <p className="font-medium">{s.titolo}</p>
                     <span className="text-xs text-gray-400">
-                      {new Date(s.created_at).toLocaleDateString()}
+                      {s.created_at ? new Date(s.created_at).toLocaleDateString() : "-"}
                     </span>
                   </div>
-                  {s.descrizione && <p className="text-xs text-gray-400 mt-1 line-clamp-2">{s.descrizione}</p>}
+                  {s.descrizione && (
+                    <p className="text-xs text-gray-400 mt-1 line-clamp-2">
+                      {s.descrizione}
+                    </p>
+                  )}
                 </button>
               ))}
             </div>
@@ -257,11 +287,36 @@ export default function SchedeAdminPage() {
               <h3 className="text-sm font-semibold">Esercizi</h3>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                <input className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm" placeholder="Esercizio (es. Squat)" value={exNome} onChange={(e) => setExNome(e.target.value)} />
-                <input className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm" placeholder="Serie (es. 4)" value={exSerie} onChange={(e) => setExSerie(e.target.value)} />
-                <input className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm" placeholder="Ripetizioni (es. 8-10)" value={exRip} onChange={(e) => setExRip(e.target.value)} />
-                <input className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm" placeholder="Recupero (es. 90s)" value={exRec} onChange={(e) => setExRec(e.target.value)} />
-                <input className="md:col-span-2 rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm" placeholder="Note" value={exNote} onChange={(e) => setExNote(e.target.value)} />
+                <input
+                  className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                  placeholder="Esercizio (es. Squat)"
+                  value={exNome}
+                  onChange={(e) => setExNome(e.target.value)}
+                />
+                <input
+                  className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                  placeholder="Serie (es. 4)"
+                  value={exSerie}
+                  onChange={(e) => setExSerie(e.target.value)}
+                />
+                <input
+                  className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                  placeholder="Ripetizioni (es. 8-10)"
+                  value={exRip}
+                  onChange={(e) => setExRip(e.target.value)}
+                />
+                <input
+                  className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                  placeholder="Recupero (es. 90s)"
+                  value={exRec}
+                  onChange={(e) => setExRec(e.target.value)}
+                />
+                <input
+                  className="md:col-span-2 rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                  placeholder="Note"
+                  value={exNote}
+                  onChange={(e) => setExNote(e.target.value)}
+                />
               </div>
 
               <button
@@ -276,12 +331,19 @@ export default function SchedeAdminPage() {
               ) : (
                 <div className="space-y-2">
                   {esercizi.map((ex) => (
-                    <div key={ex.id} className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                    <div
+                      key={ex.id}
+                      className="rounded-2xl border border-white/10 bg-black/20 p-3"
+                    >
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
-                          <p className="font-medium truncate">{ex.ordine + 1}. {ex.nome}</p>
+                          <p className="font-medium truncate">
+                            {ex.ordine + 1}. {ex.nome}
+                          </p>
                           <p className="text-xs text-gray-400">
-                            {ex.serie ? `Serie: ${ex.serie}` : "Serie: -"} · {ex.ripetizioni ? `Rep: ${ex.ripetizioni}` : "Rep: -"} · {ex.recupero ? `Rec: ${ex.recupero}` : "Rec: -"}
+                            {ex.serie ? `Serie: ${ex.serie}` : "Serie: -"} ·{" "}
+                            {ex.ripetizioni ? `Rep: ${ex.ripetizioni}` : "Rep: -"} ·{" "}
+                            {ex.recupero ? `Rec: ${ex.recupero}` : "Rec: -"}
                           </p>
                           {ex.note && <p className="text-xs text-gray-400 mt-1">{ex.note}</p>}
                         </div>
