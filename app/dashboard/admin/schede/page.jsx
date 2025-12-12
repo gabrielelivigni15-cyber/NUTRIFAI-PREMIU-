@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import { supabase } from "../../../../lib/supabaseClient"
 
-export default function SchedeAdminPage() {
+export default function Page() {
   const [loading, setLoading] = useState(true)
   const [schede, setSchede] = useState([])
   const [selected, setSelected] = useState(null)
@@ -75,11 +75,7 @@ export default function SchedeAdminPage() {
 
     const { data, error } = await supabase
       .from("schede_allenamento")
-      .insert({
-        titolo: titolo.trim(),
-        descrizione: descrizione.trim() || null,
-        coach_id: uid,
-      })
+      .insert({ titolo: titolo.trim(), descrizione: descrizione.trim() || null, coach_id: uid })
       .select()
       .single()
 
@@ -111,11 +107,7 @@ export default function SchedeAdminPage() {
     if (!selected) return
     if (!confirm("Eliminare questa scheda?")) return
 
-    const { error } = await supabase
-      .from("schede_allenamento")
-      .delete()
-      .eq("id", selected.id)
-
+    const { error } = await supabase.from("schede_allenamento").delete().eq("id", selected.id)
     if (error) return setErr(error.message)
 
     setMsg("Scheda eliminata ✅")
@@ -162,13 +154,131 @@ export default function SchedeAdminPage() {
     await loadEsercizi(selected.id)
   }
 
+  // =========================
+  // 🤖 AI STUDIO – STATE
+  // =========================
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiLoading, setAiLoading] = useState(false)
+  const [aiErr, setAiErr] = useState("")
+  const [aiDraft, setAiDraft] = useState(null)
+
+  const [aiForm, setAiForm] = useState({
+    obiettivo: "ipertrofia",
+    livello: "intermedio",
+    giorni: 3,
+    attrezzatura: "palestra completa",
+    limitazioni: "",
+    focus: "equilibrata",
+    stileCoach: "tecnico ma umano",
+    lingua: "it",
+  })
+
+  const generateWithAI = async () => {
+    console.log("AI GENERATE CLICK")
+
+    setAiErr("")
+    setAiDraft(null)
+    setAiLoading(true)
+
+    try {
+      const res = await fetch("/api/ai/genera-scheda", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(aiForm),
+      })
+
+      const json = await res.json()
+      console.log("AI RESPONSE:", json)
+
+      if (!res.ok || !json?.ok) throw new Error(json?.error || "Errore generazione AI")
+
+      setAiDraft(json.data)
+    } catch (e) {
+      console.error("AI ERROR:", e)
+      setAiErr(e.message)
+    } finally {
+      setAiLoading(false)
+    }
+  }
+
+  const applyAIDraftToDB = async () => {
+    resetAlerts()
+    setErr("")
+    setMsg("")
+
+    if (!aiDraft) return setAiErr("Nessuna bozza AI da applicare.")
+
+    try {
+      const { data: sessionData } = await supabase.auth.getSession()
+      const uid = sessionData?.session?.user?.id
+      if (!uid) throw new Error("Sessione non valida. Rifai login.")
+
+      // 1) crea scheda
+      const { data: scheda, error: schedaErr } = await supabase
+        .from("schede_allenamento")
+        .insert({
+          titolo: (aiDraft.titolo || "Scheda AI").trim(),
+          descrizione: (aiDraft.descrizione || "").trim() || null,
+          coach_id: uid,
+        })
+        .select()
+        .single()
+
+      if (schedaErr) throw schedaErr
+
+      // 2) crea esercizi
+      const rows = (aiDraft.esercizi || [])
+        .slice(0, 50)
+        .map((ex, i) => ({
+          scheda_id: scheda.id,
+          nome: (ex.nome || "").trim(),
+          serie: (ex.serie || "").toString(),
+          ripetizioni: (ex.ripetizioni || "").toString(),
+          recupero: (ex.recupero || "").toString(),
+          note: (ex.note || "").toString(),
+          ordine: Number.isFinite(ex.ordine) ? ex.ordine : i,
+        }))
+        .filter((r) => r.nome)
+
+      if (rows.length) {
+        const { error: exErr } = await supabase.from("scheda_esercizi").insert(rows)
+        if (exErr) throw exErr
+      }
+
+      setMsg("Scheda AI creata ✅ (ora puoi modificarla)")
+      await loadSchede()
+      await selectScheda(scheda)
+
+      setAiOpen(false)
+      setAiDraft(null)
+      setAiErr("")
+    } catch (e) {
+      console.error(e)
+      setErr(e.message || "Errore applicazione bozza AI")
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Schede allenamento</h1>
-        <p className="text-sm text-gray-400 mt-1">
-          Crea, modifica e gestisci le schede. (Admin/Coach)
-        </p>
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">Schede allenamento</h1>
+          <p className="text-sm text-gray-400 mt-1">
+            Crea, modifica e gestisci le schede. (Admin/Coach)
+          </p>
+        </div>
+
+        <button
+          onClick={() => {
+            console.log("AI STUDIO OPEN")
+            setAiOpen(true)
+            setAiErr("")
+            setAiDraft(null)
+          }}
+          className="rounded-2xl bg-white/15 hover:bg-white/20 px-4 py-2 text-sm"
+        >
+          ✨ AI Studio
+        </button>
       </div>
 
       {(err || msg) && (
@@ -207,21 +317,17 @@ export default function SchedeAdminPage() {
                   key={s.id}
                   onClick={() => selectScheda(s)}
                   className={`w-full text-left rounded-2xl border p-3 hover:bg-white/5 ${
-                    selected?.id === s.id
-                      ? "border-white/20 bg-white/5"
-                      : "border-white/10"
+                    selected?.id === s.id ? "border-white/20 bg-white/5" : "border-white/10"
                   }`}
                 >
                   <div className="flex items-center justify-between">
                     <p className="font-medium">{s.titolo}</p>
                     <span className="text-xs text-gray-400">
-                      {s.created_at ? new Date(s.created_at).toLocaleDateString() : "-"}
+                      {s.created_at ? new Date(s.created_at).toLocaleDateString() : ""}
                     </span>
                   </div>
                   {s.descrizione && (
-                    <p className="text-xs text-gray-400 mt-1 line-clamp-2">
-                      {s.descrizione}
-                    </p>
+                    <p className="text-xs text-gray-400 mt-1 line-clamp-2">{s.descrizione}</p>
                   )}
                 </button>
               ))}
@@ -231,9 +337,7 @@ export default function SchedeAdminPage() {
 
         {/* Editor */}
         <div className="rounded-2xl border border-white/10 bg-white/5 p-4 space-y-4">
-          <h2 className="text-sm font-semibold">
-            {selected ? "Modifica scheda" : "Crea nuova scheda"}
-          </h2>
+          <h2 className="text-sm font-semibold">{selected ? "Modifica scheda" : "Crea nuova scheda"}</h2>
 
           <div className="space-y-2">
             <label className="text-xs text-gray-400">Titolo</label>
@@ -331,10 +435,7 @@ export default function SchedeAdminPage() {
               ) : (
                 <div className="space-y-2">
                   {esercizi.map((ex) => (
-                    <div
-                      key={ex.id}
-                      className="rounded-2xl border border-white/10 bg-black/20 p-3"
-                    >
+                    <div key={ex.id} className="rounded-2xl border border-white/10 bg-black/20 p-3">
                       <div className="flex items-center justify-between gap-3">
                         <div className="min-w-0">
                           <p className="font-medium truncate">
@@ -366,6 +467,196 @@ export default function SchedeAdminPage() {
           )}
         </div>
       </div>
+
+      {/* =========================
+          ✨ AI STUDIO OVERLAY
+         ========================= */}
+      {aiOpen && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-5xl rounded-3xl border border-white/10 bg-nutriBg p-5 md:p-6">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs text-gray-400 uppercase tracking-[0.18em]">Nutrifai AI Studio</p>
+                <h2 className="text-xl font-semibold mt-1">Genera una scheda “coach-grade”</h2>
+                <p className="text-sm text-gray-400 mt-1">
+                  L’AI propone. Tu controlli. Poi confermi e salvi.
+                </p>
+              </div>
+
+              <button
+                onClick={() => setAiOpen(false)}
+                className="rounded-2xl bg-white/10 hover:bg-white/15 px-3 py-2 text-sm"
+              >
+                Chiudi
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 mt-5">
+              {/* LEFT: input */}
+              <div className="rounded-3xl border border-white/10 bg-white/5 p-4 space-y-3">
+                <p className="text-sm font-semibold">Brief rapido</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  <select
+                    className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                    value={aiForm.obiettivo}
+                    onChange={(e) => setAiForm((s) => ({ ...s, obiettivo: e.target.value }))}
+                  >
+                    <option value="ipertrofia">Ipertrofia</option>
+                    <option value="forza">Forza</option>
+                    <option value="dimagrimento">Dimagrimento</option>
+                    <option value="performance">Performance</option>
+                    <option value="ricondizionamento">Ricondizionamento</option>
+                  </select>
+
+                  <select
+                    className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                    value={aiForm.livello}
+                    onChange={(e) => setAiForm((s) => ({ ...s, livello: e.target.value }))}
+                  >
+                    <option value="base">Base</option>
+                    <option value="intermedio">Intermedio</option>
+                    <option value="avanzato">Avanzato</option>
+                  </select>
+
+                  <select
+                    className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                    value={aiForm.giorni}
+                    onChange={(e) => setAiForm((s) => ({ ...s, giorni: Number(e.target.value) }))}
+                  >
+                    {[2, 3, 4, 5, 6].map((n) => (
+                      <option key={n} value={n}>
+                        {n} giorni
+                      </option>
+                    ))}
+                  </select>
+
+                  <select
+                    className="rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                    value={aiForm.attrezzatura}
+                    onChange={(e) => setAiForm((s) => ({ ...s, attrezzatura: e.target.value }))}
+                  >
+                    <option value="palestra completa">Palestra completa</option>
+                    <option value="casa manubri">Casa (manubri)</option>
+                    <option value="casa corpo libero">Casa (corpo libero)</option>
+                    <option value="mista">Mista</option>
+                  </select>
+                </div>
+
+                <input
+                  className="w-full rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                  placeholder="Focus (es. glutei, schiena, squat...)"
+                  value={aiForm.focus}
+                  onChange={(e) => setAiForm((s) => ({ ...s, focus: e.target.value }))}
+                />
+
+                <input
+                  className="w-full rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                  placeholder="Limitazioni/infortuni (es. lombare, spalla...)"
+                  value={aiForm.limitazioni}
+                  onChange={(e) => setAiForm((s) => ({ ...s, limitazioni: e.target.value }))}
+                />
+
+                <select
+                  className="w-full rounded-2xl bg-black/30 border border-white/10 px-3 py-2 text-sm"
+                  value={aiForm.stileCoach}
+                  onChange={(e) => setAiForm((s) => ({ ...s, stileCoach: e.target.value }))}
+                >
+                  <option value="tecnico ma umano">Tecnico ma umano</option>
+                  <option value="motivazionale ma serio">Motivazionale ma serio</option>
+                  <option value="minimal e diretto">Minimal e diretto</option>
+                </select>
+
+                {aiErr && (
+                  <div className="rounded-2xl border border-red-500/30 bg-red-500/5 p-3 text-sm text-red-200">
+                    {aiErr}
+                  </div>
+                )}
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={generateWithAI}
+                    disabled={aiLoading}
+                    className="rounded-2xl bg-white/15 hover:bg-white/20 px-4 py-2 text-sm disabled:opacity-60"
+                  >
+                    {aiLoading ? "Generazione…" : "⚡ Genera"}
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setAiDraft(null)
+                      setAiErr("")
+                    }}
+                    className="rounded-2xl bg-white/10 hover:bg-white/15 px-4 py-2 text-sm"
+                  >
+                    Reset
+                  </button>
+                </div>
+
+                <p className="text-xs text-gray-500">
+                  Tip: se vuoi “wow”, scrivi focus e limitazioni in modo realistico.
+                </p>
+              </div>
+
+              {/* RIGHT: preview */}
+              <div className="rounded-3xl border border-white/10 bg-white/5 p-4">
+                {!aiDraft ? (
+                  <div className="text-sm text-gray-400">
+                    Premi <b>Genera</b> e qui comparirà la bozza.
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                      <p className="text-xs text-gray-400">Titolo</p>
+                      <p className="text-lg font-semibold">{aiDraft.titolo}</p>
+                      <p className="text-xs text-gray-400 mt-2">Descrizione</p>
+                      <p className="text-sm text-gray-200/90 whitespace-pre-wrap">
+                        {aiDraft.descrizione}
+                      </p>
+                    </div>
+
+                    <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                      <p className="text-sm font-semibold">Esercizi</p>
+                      <div className="mt-2 space-y-2">
+                        {(aiDraft.esercizi || []).slice(0, 12).map((ex) => (
+                          <div
+                            key={ex.ordine}
+                            className="rounded-2xl border border-white/10 bg-white/5 p-3"
+                          >
+                            <div className="flex items-center justify-between">
+                              <p className="font-medium">
+                                {Number.isFinite(ex.ordine) ? ex.ordine + 1 : "•"} {ex.nome}
+                              </p>
+                              <p className="text-xs text-gray-400">{ex.recupero}</p>
+                            </div>
+                            <p className="text-xs text-gray-300 mt-1">
+                              Serie: {ex.serie} · Rep: {ex.ripetizioni}
+                            </p>
+                            {ex.note && <p className="text-xs text-gray-400 mt-1">{ex.note}</p>}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-end gap-2">
+                      <button
+                        onClick={applyAIDraftToDB}
+                        className="rounded-2xl bg-white/15 hover:bg-white/20 px-4 py-2 text-sm"
+                      >
+                        ✅ Conferma e crea in app
+                      </button>
+                    </div>
+
+                    <p className="text-xs text-gray-500">
+                      Dopo la creazione puoi modificarla normalmente a destra.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
