@@ -13,13 +13,14 @@ export default function DashboardLayout({ children }) {
   const [role, setRole] = useState("cliente")
   const [fatalError, setFatalError] = useState("")
 
-  const isActive = (href) => pathname === href || pathname.startsWith(href + "/")
+  // ✅ Active helpers (fix: Overview non deve essere attivo su /dashboard/...)
+  const isExact = (href) => pathname === href
+  const isSection = (href) => pathname.startsWith(href + "/")
 
   useEffect(() => {
     const load = async () => {
       setFatalError("")
 
-      // session
       const { data: sessionData } = await supabase.auth.getSession()
       const session = sessionData?.session
       if (!session?.user) {
@@ -29,7 +30,7 @@ export default function DashboardLayout({ children }) {
 
       const user = session.user
 
-      // ruolo da user_roles (fondamentale per admin/coach)
+      // ruolo da user_roles
       const { data: roleRow, error: roleErr } = await supabase
         .from("user_roles")
         .select("role")
@@ -42,7 +43,7 @@ export default function DashboardLayout({ children }) {
       }
       setRole(roleRow?.role ?? "cliente")
 
-      // profilo (non blocchiamo tutto se manca: proviamo a crearlo)
+      // profilo
       const { data: prof, error: profErr } = await supabase
         .from("profiles")
         .select("*")
@@ -54,6 +55,7 @@ export default function DashboardLayout({ children }) {
         return
       }
 
+      // se manca, prova a crearlo
       if (!prof) {
         const { error: insErr } = await supabase
           .from("profiles")
@@ -119,10 +121,11 @@ export default function DashboardLayout({ children }) {
   const isCoach = role === "coach"
   const isCliente = role === "cliente"
 
-  const linkClass = (href) =>
-    `flex items-center gap-2 px-3 py-2 rounded-xl ${
-      isActive(href) ? "bg-white/5" : "hover:bg-white/5"
-    }`
+  const baseLink =
+    "flex items-center gap-2 px-3 py-2 rounded-xl transition-colors"
+
+  const linkCls = (active) =>
+    `${baseLink} ${active ? "bg-white/5" : "hover:bg-white/5"}`
 
   return (
     <div className="min-h-screen bg-nutriBg text-gray-100 flex">
@@ -138,26 +141,33 @@ export default function DashboardLayout({ children }) {
         </div>
 
         <nav className="flex-1 space-y-1 text-sm">
-          <a href="/dashboard" className={linkClass("/dashboard")}>
+          {/* ✅ Overview SOLO exact */}
+          <a href="/dashboard" className={linkCls(isExact("/dashboard"))}>
             <LineChart className="w-4 h-4" />
             <span>Overview</span>
           </a>
 
           {isAdmin && (
             <>
-              <a href="/dashboard/admin/utenti" className={linkClass("/dashboard/admin/utenti")}>
+              <a
+                href="/dashboard/admin/utenti"
+                className={linkCls(isSection("/dashboard/admin/utenti") || isExact("/dashboard/admin/utenti"))}
+              >
                 <Users className="w-4 h-4" />
                 <span>Gestione utenti</span>
               </a>
 
-              <a href="/dashboard/admin/schede" className={linkClass("/dashboard/admin/schede")}>
+              <a
+                href="/dashboard/admin/schede"
+                className={linkCls(isSection("/dashboard/admin/schede") || isExact("/dashboard/admin/schede"))}
+              >
                 <Dumbbell className="w-4 h-4" />
                 <span>Schede allenamento</span>
               </a>
 
               <a
                 href="/dashboard/admin/alimentazione"
-                className={linkClass("/dashboard/admin/alimentazione")}
+                className={linkCls(isSection("/dashboard/admin/alimentazione") || isExact("/dashboard/admin/alimentazione"))}
               >
                 <Salad className="w-4 h-4" />
                 <span>Piani alimentari</span>
@@ -167,12 +177,18 @@ export default function DashboardLayout({ children }) {
 
           {isCoach && (
             <>
-              <a href="/dashboard/coach/clienti" className={linkClass("/dashboard/coach/clienti")}>
+              <a
+                href="/dashboard/coach/clienti"
+                className={linkCls(isSection("/dashboard/coach/clienti") || isExact("/dashboard/coach/clienti"))}
+              >
                 <Users className="w-4 h-4" />
                 <span>I miei clienti</span>
               </a>
 
-              <a href="/dashboard/coach/schede" className={linkClass("/dashboard/coach/schede")}>
+              <a
+                href="/dashboard/coach/schede"
+                className={linkCls(isSection("/dashboard/coach/schede") || isExact("/dashboard/coach/schede"))}
+              >
                 <Dumbbell className="w-4 h-4" />
                 <span>Schede create</span>
               </a>
@@ -183,7 +199,7 @@ export default function DashboardLayout({ children }) {
             <>
               <a
                 href="/dashboard/user/allenamenti"
-                className={linkClass("/dashboard/user/allenamenti")}
+                className={linkCls(isSection("/dashboard/user/allenamenti") || isExact("/dashboard/user/allenamenti"))}
               >
                 <Dumbbell className="w-4 h-4" />
                 <span>I miei allenamenti</span>
@@ -191,7 +207,7 @@ export default function DashboardLayout({ children }) {
 
               <a
                 href="/dashboard/user/alimentazione"
-                className={linkClass("/dashboard/user/alimentazione")}
+                className={linkCls(isSection("/dashboard/user/alimentazione") || isExact("/dashboard/user/alimentazione"))}
               >
                 <Salad className="w-4 h-4" />
                 <span>Il mio piano alimentare</span>
