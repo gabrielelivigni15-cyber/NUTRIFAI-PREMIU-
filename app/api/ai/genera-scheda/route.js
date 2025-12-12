@@ -6,9 +6,37 @@ const client = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 })
 
+function pickTextFromResponse(response) {
+  // Varianti comuni del payload Responses API
+  return (
+    response?.output?.[0]?.content?.[0]?.text ||
+    response?.output_text ||
+    response?.output?.map((o) => o?.content?.map((c) => c?.text).join("")).join("\n") ||
+    ""
+  )
+}
+
+function cleanToJsonCandidate(text) {
+  // toglie fence e roba extra
+  return text
+    .replace(/```json/gi, "```")
+    .replace(/```/g, "")
+    .trim()
+}
+
 export async function POST(req) {
   try {
+    console.log("🔥 /api/ai/genera-scheda HIT")
+
+    if (!process.env.OPENAI_API_KEY) {
+      return Response.json(
+        { ok: false, error: "OPENAI_API_KEY mancante su Vercel" },
+        { status: 500 }
+      )
+    }
+
     const body = await req.json()
+    console.log("📩 BODY:", body)
 
     const {
       obiettivo = "ipertrofia",
@@ -34,7 +62,7 @@ CONTESTO:
 - Stile coach: ${stileCoach}
 - Lingua: ${lingua}
 
-OUTPUT: restituisci SOLO JSON valido con questa forma:
+OUTPUT: restituisci SOLO JSON valido con questa forma (nessun testo extra):
 
 {
   "titolo": "string",
@@ -51,26 +79,39 @@ REGOLE:
 - recuperi realistici
 - note tecniche brevi
 - ordine 0..N
-`
+`.trim()
 
+    // 🔁 IMPORTANTISSIMO:
+    // Se "gpt-5.2" ti dà errore, cambia in un modello che hai abilitato.
+    // Esempi comuni: "gpt-4.1-mini", "gpt-4.1", "gpt-4o-mini"
     const response = await client.responses.create({
-      model: "gpt-5.2",
+      model: "gpt-4.1-mini",
       input: [{ role: "user", content: prompt }],
     })
 
-    const text =
-      response.output?.[0]?.content?.[0]?.text ||
-      response.output_text ||
-      ""
+    const raw = pickTextFromResponse(response)
+    if (!raw) throw new Error("Nessun output dall'AI")
 
-    if (!text) throw new Error("Nessun output dall'AI")
+    const cleaned = cleanToJsonCandidate(raw)
 
-    // LLM a volte mette backticks: li togliamo
-    const cleaned = text.replace(/```json|```/g, "").trim()
-    const data = JSON.parse(cleaned)
+    let data
+    try {
+      data = JSON.parse(cleaned)
+    } catch (parseErr) {
+      console.log("⚠️ JSON parse failed. RAW:", raw)
+      console.log("⚠️ JSON parse failed. CLEANED:", cleaned)
+      throw new Error("Risposta AI non è JSON valido (vedi log Vercel)")
+    }
+
+    // Validazione minima (così se manca qualcosa lo vedi subito)
+    if (!data?.titolo || !Array.isArray(data?.esercizi)) {
+      console.log("⚠️ JSON structure unexpected:", data)
+      throw new Error("JSON AI non ha la struttura attesa")
+    }
 
     return Response.json({ ok: true, data })
   } catch (e) {
+    console.log("❌ AI ERROR:", e)
     return Response.json(
       { ok: false, error: e?.message || "Errore AI" },
       { status: 500 }
